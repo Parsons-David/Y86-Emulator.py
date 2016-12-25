@@ -1,13 +1,10 @@
 from sys import argv
 import logging
 
-memory = None # Reference to "Memory" for the emulator.
-iPtr = 0 # Reference to the current Instruction Pointer for the emulator.
-
+# Directives
 def textDirective(directive):
     # Defines Global References
-    global iPtr
-    global memory
+    global iPtr, memory
 
     # Sets Instruction Pointer
     iPtr = int(directive.split('\t')[1])
@@ -20,8 +17,8 @@ def textDirective(directive):
     # Copies Instructions from File into Memory
     tempPtr = iPtr
     for bit in instructions:
-        memory[iPtr] = bit
-        iPtr += 1
+        memory[tempPtr] = bit
+        tempPtr += 1
 
     logging.info('\t\t\tInstructions Read')
 
@@ -51,20 +48,142 @@ def byteDirective(directive):
 def readDirectives(directives):
     for directive in directives:
         dirType = directive.split('\t')[0]
-        if dirType == '.byte':
-            logging.info('\t\t%s Directive' % dirType)
-            byteDirective(directive)
-        elif dirType == '.size':
-            logging.info('\t\t%s Directive' % dirType)
-            sizeDirective(directive)
-        elif dirType == '.text':
-            logging.info('\t\t%s Directive' % dirType)
-            textDirective(directive)
-        else:
-            logging.debug('\t%s is an Invalid Directive' % dirType)
+        try:
+            directMethods[dirType](directive)
+        except KeyError:
+            logging.debug('\t\t\tInvalid Directive Caught')
+# End Directives
+
+# Operation Methods
+
+def readInteger(localPtr):
+    global memory
+    hexStr = ''
+    for i in xrange(3, -1, -1):
+        for j in xrange(0, 2, 1):
+            hexStr  = hexStr + memory[localPtr + ((2 * i) + j)]
+    print hexStr
+    return int(hexStr, 16)
+
+def writeInteger(localPtr, value):
+    global memory
+    # integer value cast to its string representation
+    decimalStr = chr(hex(value))
+    print decimalStr
+
+    # extends hex string
+    while len(decimalStr) < 8 :
+        decimalStr = '0' + decimalStr
+
+def nop():
+    global iPtr
+    iPtr += 2
+    logging.info('\t\tnop Operation Performed')
+    print 'nop'
+
+def halt():
+    global iPtr
+    iPtr += 2
+    logging.info('\t\thalt Operation Performed')
+    print 'halt'
+
+def rrmovl():
+    global iPtr, reg
+    # rb = rA
+    reg[memory[iPtr + 3]] = reg[memory[iPtr + 2]]
+    iPtr += 4
+    logging.info('\t\trrmovl Operation Performed')
+    print 'rrmovl'
+
+def irmovl():
+    global iPtr, memory, reg
+    # rB = [0x01234567]
+    reg[memory[iPtr + 3]] = readInteger(iPtr + 4)
+    # print reg[memory[iPtr + 3]]
+    iPtr += 12
+    logging.info('\t\tirmovl Operation Performed')
+    print 'irmovl'
+
+def rmmovl():
+    global iPtr
+    memory[]
+    iPtr += 12
+    print 'rmmovl'
+
+def mrmovl():
+    global iPtr
+    iPtr += 12
+    print 'mrmovl'
+
+def op1():
+    global iPtr
+    iPtr += 4
+    print 'op1'
+
+def jXX():
+    global iPtr
+    iPtr += 10
+    print 'jXX'
+
+def call():
+    global iPtr
+    iPtr += 10
+    print 'call'
+
+def ret():
+    global iPtr
+    iPtr += 2
+    print 'ret'
+
+def pushl():
+    global iPtr
+    iPtr += 4
+    print 'pushl'
+
+def popl():
+    global iPtr
+    iPtr += 4
+    print 'popl'
+
+def readX():
+    global iPtr
+    iPtr += 12
+    print 'readX'
+
+def writeX():
+    global iPtr
+    iPtr += 12
+    print 'writeX'
+
+def movsbl():
+    global iPtr
+    iPtr += 12
+    print 'movsbl'
+
+def run():
+    global memory, iPtr, reg, opMethods
+
+    while memory[iPtr] is not '1':
+        opMethods[memory[iPtr]]()
+    # else:
+    #     opMethods[memory[iPtr]]()
+    #     break
+    opMethods[memory[iPtr]]()
+
+# End Operation Methods
+
+# Global Variables
+
+memory = None # Reference to "Memory" for the emulator.
+iPtr = 0 # Reference to the current Instruction Pointer for the emulator.
+reg = {'0':0, '1':0, '2':0, '3':0, '4':0, '5':0, '6':0, '7':0}
+directMethods = {'.text' : textDirective, '.size' : sizeDirective, '.byte' : byteDirective}
+opMethods = {'0' : nop, '1' : halt, '2' : rrmovl, '3' : irmovl, '4' : rmmovl, '5' : mrmovl, '6' : op1, '7' : jXX,
+             '8' : call, '9' : ret, 'a' : pushl, 'b' : popl, 'c' : readX, 'd' : writeX, 'e' : movsbl}
+
+# End Global Variables
 
 # Begin Main
-
 logging.basicConfig(filename = 'emul.log', level = logging.DEBUG, filemode = 'w')
 
 y86Filename = argv[1]
@@ -90,9 +209,12 @@ lines = file.read().split('\n')
 
 readDirectives(lines)
 
+run()
+
+
 # for line in lines:
 #     pieces = line.split('\t')
 #     for part in pieces:
 #         print part
 
-print memory
+# print memory
