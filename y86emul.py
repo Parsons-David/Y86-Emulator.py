@@ -1,5 +1,5 @@
 from sys import argv
-import logging, sys
+import logging, sys, signal
 
 # Directives
 def textDirective(directive):
@@ -7,7 +7,7 @@ def textDirective(directive):
     global iPtr, memory
 
     # Sets Instruction Pointer
-    iPtr = int(directive.split('\t')[1])
+    iPtr = 2 * int(directive.split('\t')[1], 16)
     logging.info('\t\t\tInitial Instruction Pointer Set to: %d' % iPtr)
 
     # Reads Instructions from file
@@ -39,8 +39,39 @@ def byteDirective(directive):
     tempPtr = 2 * int(directive.split('\t')[1], 16)
 
     # Copies both hex characters representing the byte into the given location in memory
+    logging.info('\t\t\tPlacing %c at %d', directive.split('\t')[2][0], tempPtr)
     memory[tempPtr] = directive.split('\t')[2][0]
+    logging.info('\t\t\tPlacing %c at %d', directive.split('\t')[2][1], tempPtr + 1)
     memory[tempPtr + 1] = directive.split('\t')[2][1]
+
+def stringDirective(directive):
+    # Defines Global Reference
+    global memory
+
+    # Stores Location for string to be stored
+    tempPtr = 2 * int(directive.split('\t')[1], 16)
+
+    # String with "" removed
+    st = directive.split('\t')[2].replace("\"", "")
+
+    # Places every char in memory stored as its hex ascii representation
+    for c in st:
+        logging.info('\t\t\tPlacing %c at %d', hex(ord(c)).split('x')[1][0], tempPtr)
+        memory[tempPtr] = hex(ord(c)).split('x')[1][0]
+        logging.info('\t\t\tPlacing %c at %d', hex(ord(c)).split('x')[1][1], tempPtr + 1)
+        memory[tempPtr + 1] = hex(ord(c)).split('x')[1][1]
+        tempPtr += 2
+
+def longDirective(directive):
+    # Defines Global Reference
+    global memory
+
+    # Stores Location for long to be stored
+    tempPtr = 2 * int(directive.split('\t')[1], 16)
+
+    # Writes Decimal Int to given memory loaction
+    logging.info('\t\t\tStoring %d at %d', int(directive.split('\t')[2]), tempPtr)
+    writeInteger (tempPtr, int(directive.split('\t')[2]))
 
 # Parameters - 'directives' : array of y86 file directives
 # Interprets a list of directives and organizes the
@@ -62,26 +93,36 @@ def readInteger(localPtr):
         for j in xrange(0, 2, 1):
             hexStr  = hexStr + memory[localPtr + ((2 * i) + j)]
 
-    return int(hexStr, 16)
+    output = int(hexStr, 16)
+
+    if output > 0x7FFFFFFF:
+        output -= 0x100000000
+
+    return output
 
 def writeInteger(localPtr, value):
     global memory
+
+    if value < 0:
+        logging.debug('\t\t\tValue written to memory was negative: %d', value)
+
     # integer value cast to its string representation
     hexStr = hex(value).split('x')[1]
 
     # extends hex string
     while len(hexStr) < 8 :
-        hexStr = '0' + hexStr
+        # Sign Extends the integer
+        hexStr = ('1' if value < 0 else '0') + hexStr
 
     finalStr = ''
     for i in xrange(3, -1, -1):
         for j in xrange(0, 2, 1):
             finalStr  = finalStr + hexStr[((2 * i) + j)]
 
+    logging.info('\t\t\tWriting %d -> %s -> %s to %d' % (value, hexStr, finalStr, localPtr))
+
     for i in xrange(0, 8, 1):
         memory[localPtr + i] = finalStr[i]
-
-    logging.info('\t\t\tWriting %d -> %s -> %s to %d' % (value, hexStr, finalStr, localPtr))
 
 def nop(): # add 00 check
     global iPtr
@@ -108,19 +149,20 @@ def irmovl(): # add 30F and reg check
     iPtr += 12
 
 def rmmovl(): # add 50 check
-    # Coming back to this for prog2
     global iPtr, memory, reg
     # memory[rB + 0x01234567] = rA
-    writeInteger(2 * (reg[memory[iPtr + 3]] + readInteger(iPtr + 4)), reg[memory[iPtr + 2]])
+    tempPtr = 2 * (readInteger(iPtr + 4) + reg[memory[iPtr + 3]])
+
     logging.info('\t\trmmovl Operation Performed\n\t\t\tmemory[2 * (reg[%s] + %d)] = %d' % (memory[iPtr + 3], readInteger(iPtr + 4), reg[memory[iPtr + 2]]))
+    writeInteger(tempPtr, reg[memory[iPtr + 2]])
     iPtr += 12
 
 def mrmovl():
     global iPtr, memory, reg
 
-    logging.info('\t\tmrmovl Operation Performed\n\t\t\treg[%s] = memory[reg[%s] + %d] -> %d' % (memory[iPtr + 3], memory[iPtr + 2], readInteger(iPtr + 4), readInteger(reg[memory[iPtr + 2]] + readInteger(iPtr + 4))))
+    logging.info('\t\tmrmovl Operation Performed\n\t\t\treg[%s] = memory[reg[%s] + %d] -> %d' % (memory[iPtr + 2], memory[iPtr + 3], readInteger(iPtr + 4), readInteger(reg[memory[iPtr + 3]] + readInteger(iPtr + 4))))
 
-    reg[memory[iPtr + 3]] = readInteger(2 * (reg[memory[iPtr + 2]] + readInteger(iPtr + 4)))
+    reg[memory[iPtr + 2]] = readInteger(2 * (reg[memory[iPtr + 3]] + readInteger(iPtr + 4)))
 
     iPtr += 12
 
@@ -227,12 +269,16 @@ def jXX():
         iPtr = destination
         return
     elif jmpType is '1' :
+        logging.info('\t\tjle Operation Performed')
         if ((SF ^ OF) or ZF):
             iPtr = destination
+            logging.info('\t\t\tJumping to %d' % (destination))
             return
     elif jmpType is '2' :
-        if ((SF ^ OF) or ZF):
+        logging.info('\t\tjl Operation Performed')
+        if (SF ^ OF):
             iPtr = destination
+            logging.info('\t\t\tJumping to %d' % (destination))
             return
     elif jmpType is '3' :
         logging.info('\t\tje Operation Performed\n\t\t\tZF = %d' % (ZF))
@@ -241,16 +287,22 @@ def jXX():
             logging.info('\t\t\tJumping to %d' % (destination))
             return
     elif jmpType is '4' :
+        logging.info('\t\tjne Operation Performed\n\t\t\tZF = %d' % (ZF))
         if (ZF == 0):
             iPtr = destination
+            logging.info('\t\t\tJumping to %d' % (destination))
             return
     elif jmpType is '5' :
-        if ((SF ^ OF) or ZF):
+        logging.info('\t\tjge Operation Performed')
+        if (not(SF ^ OF)):
             iPtr = destination
+            logging.info('\t\t\tJumping to %d' % (destination))
             return
     elif jmpType is '6' :
-        if ((SF ^ OF) or ZF):
+        logging.info('\t\tjg Operation Performed')
+        if ((not(SF ^ OF)) or (not ZF)):
             iPtr = destination
+            logging.info('\t\t\tJumping to %d' % (destination))
             return
 
     iPtr += 10
@@ -260,47 +312,111 @@ def call():
 
     destination = 2 * readInteger(iPtr + 2)
 
-    reg[4] -= 4
+    reg['4'] -= 4
 
-    logging.info('\t\tcall Operation Performed\n\t\t\tPushed %d to memory[%d]\n\t\t\tiPtr now: %d' % (iPtr, reg[4], destination))
+    iPtr += 10
 
-    writeInteger(reg[4], iPtr)
+    logging.info('\t\tcall Operation Performed\n\t\t\tPushed %d to memory[%d]\n\t\t\tiPtr now: %d' % ((iPtr/2), 2 * reg['4'], destination))
+
+    writeInteger(2 * reg['4'], iPtr/2)
 
     iPtr = destination
 
-    # iPtr += 10
 
 def ret():
-    global iPtr
-    iPtr += 2
+    global iPtr, reg
+
+    iPtr = 2 * readInteger(2 * reg['4'])
+
+    logging.info('\t\tret Operation Performed\n\t\t\tiPtr now: %d' % (iPtr/2))
+
+    reg['4'] += 4
+
 
 def pushl():
     global iPtr
 
-    reg[4] -= 4
+    reg['4'] -= 4
 
-    logging.info('\t\tpushl Operation Performed\n\t\t\tPushed reg[%s] = %d to memory[%d]' % (memory[iPtr + 2], reg[memory[iPtr + 2]], reg[4]))
+    logging.info('\t\tpushl Operation Performed\n\t\t\tPushed reg[%s] = %d to memory[%d]' % (memory[iPtr + 2], reg[memory[iPtr + 2]], 2 * reg['4']))
 
-    writeInteger(reg[memory[iPtr + 2]], iPtr)
+    writeInteger(2 * reg['4'], reg[memory[iPtr + 2]])
 
     iPtr += 4
 
 def popl():
-    global iPtr
+    global iPtr, reg, memory
+
+    reg[memory[iPtr + 2]] = readInteger(2 * reg['4'])
+
+    logging.info('\t\tpopl Operation Performed\n\t\t\treg[%s] = %d ' % (memory[iPtr + 2], readInteger(reg['4'])))
+
+    reg['4'] += 4
+
     iPtr += 4
 
 def readX():
-    global iPtr
+    global iPtr, memory, reg, ZF
+
+    # Location in Memory for byte or int to be written
+    tempPtr = 2 * (readInteger(iPtr + 4) + reg[memory[iPtr + 2]])
+    ZF = 0
+
+    try:
+        inVal = raw_input("")
+    except KeyboardInterrupt:
+        inVal = ""
+        ZF = 1
+        logging.debug('\t\t\tCaught KeyboardInterrupt')
+
+
+    logging.info('\t\treadx Operation Performed')
+
+    if(memory[iPtr + 1] == '0'):
+        # Gets only the first byte
+        inVal = hex(ord(inVal[0])).split('x')[1]
+
+        # Stores byte at tempPtr
+        logging.info('\t\t\tPlacing %c at %d', inVal[0], tempPtr)
+        memory[tempPtr] = inVal[0]
+        logging.info('\t\t\tPlacing %c at %d', inVal[1], tempPtr + 1)
+        memory[tempPtr + 1] = inVal[1]
+
+    elif (memory[iPtr + 1] == '1'):
+        try:
+            inVal = int(inVal)
+        except ValueError:
+            inVal = -1
+        logging.info('\t\t\tPlacing %d at %d', inVal, tempPtr)
+        writeInteger(tempPtr, inVal)
+    else:
+        #Error
+        a = 9
+
     iPtr += 12
 
 def writeX():
     global iPtr, reg, memory
     localPtr = 2 * (reg[memory[iPtr + 2]]  + readInteger(iPtr + 4))
-    byte = memory[localPtr] + memory[localPtr + 1]
 
-    sys.stdout.write(chr(int(byte, 16)))
+    if(memory[iPtr + 1] == '0'):
 
-    logging.info('\t\twritex Operation Performed\n\t\t\tChar @%d = %s (ASCII %d, Hex %s, Chars %c%c)' % (localPtr/2, chr(int(byte, 16)), int(byte, 16), byte, memory[localPtr], memory[localPtr + 1]))
+        byte = memory[localPtr] + memory[localPtr + 1]
+
+        sys.stdout.write(chr(int(byte, 16)))
+
+        logging.info('\t\twriteb Operation Performed\n\t\t\tChar @%d = %s (ASCII %d, Hex %s, Chars %c%c)' % (localPtr/2, chr(int(byte, 16)), int(byte, 16), byte, memory[localPtr], memory[localPtr + 1]))
+
+    elif(memory[iPtr + 1] == '1'):
+
+        val = readInteger(localPtr)
+
+        sys.stdout.write('%d' % val)
+
+        logging.info('\t\twritel Operation Performed\n\t\t\tInt @%d = %d' % (localPtr/2, val))
+    #
+    # else:
+    #     # Error
     iPtr += 12
 
 def movsbl():
@@ -334,7 +450,8 @@ memory = None # Reference to "Memory" for the emulator.
 iPtr = 0 # Reference to the current Instruction Pointer for the emulator.
 reg = {'0':0, '1':0, '2':0, '3':0, '4':0, '5':0, '6':0, '7':0}
 ops = {'0' : addl, '1' : subl, '2' : andl, '3' : xorl, '4' : mull, '5' : cmpl}
-directMethods = {'.text' : textDirective, '.size' : sizeDirective, '.byte' : byteDirective}
+directMethods = {'.text' : textDirective, '.size' : sizeDirective, '.byte' : byteDirective, '.string' : stringDirective,
+                '.long' : longDirective}
 instructMethods = {'0' : nop, '1' : halt, '2' : rrmovl, '3' : irmovl, '4' : rmmovl, '5' : mrmovl, '6' : op1, '7' : jXX,
              '8' : call, '9' : ret, 'a' : pushl, 'b' : popl, 'c' : readX, 'd' : writeX, 'e' : movsbl}
 
